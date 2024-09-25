@@ -16,38 +16,106 @@ import (
 )
 
 func main() {
-	fmt.Println("Starting Machine Learning Algorithms Comparison")
+	fmt.Println("Starting Parallel Random Forest Algorithm")
 	startTime := time.Now()
 
 	allData := readAndPrepareData()
 	trainData, testData := splitData(allData, 0.8)
 
-	runAlgorithmComparison(
-		"Decision Tree",
-		func() (time.Duration, time.Duration, float64, float64) {
-			return testDecisionTree(trainData, testData)
-		},
+	fmt.Println("\n--- Testing Parallel Random Forest ---")
+	rf := randomforest.NewParallelRandomForest(10, 0.8)
+	parallelTrainTime, parallelEvalTime, concAccuracy := testRandomForestParallel(
+		rf,
+		trainData,
+		testData,
 	)
+	fmt.Printf("Parallel Training Time: %v\n", parallelTrainTime)
+	fmt.Printf("Parallel Evaluation Time: %v\n", parallelEvalTime)
+	fmt.Printf("Parallel Accuracy: %.2f%%\n", concAccuracy*100)
+	fmt.Printf("Total Parallel Time (No data reading): %v\n", parallelTrainTime+parallelEvalTime)
 
+	fmt.Printf("\nTotal execution time: %v\n", time.Since(startTime))
 	runAlgorithmComparison(
 		"Random Forest",
 		func() (time.Duration, time.Duration, float64, float64) {
 			return testRandomForest(trainData, testData)
 		},
 	)
+	/*
+		fmt.Println("Starting Machine Learning Algorithms Comparison")
+		startTime := time.Now()
 
-	runAlgorithmComparison("SVM", func() (time.Duration, time.Duration, float64, float64) {
-		return testSVM(trainData, testData)
-	})
+		allData := readAndPrepareData()
+		trainData, testData := splitData(allData, 0.8)
 
-	runAlgorithmComparison("ANN", func() (time.Duration, time.Duration, float64, float64) {
-		return testANN(trainData, testData)
-	})
+		runAlgorithmComparison(
+			"Decision Tree",
+			func() (time.Duration, time.Duration, float64, float64) {
+				return testDecisionTree(trainData, testData)
+			},
+		)
 
-	fmt.Println("\n--- Testing Collaborative Filtering ---")
-	testCollaborativeFiltering("datasets/Reviews.csv")
+		runAlgorithmComparison(
+			"Random Forest",
+			func() (time.Duration, time.Duration, float64, float64) {
+				return testRandomForest(trainData, testData)
+			},
+		)
 
-	fmt.Printf("\nTotal execution time: %v\n", time.Since(startTime))
+		runAlgorithmComparison("SVM", func() (time.Duration, time.Duration, float64, float64) {
+			return testSVM(trainData, testData)
+		})
+
+		runAlgorithmComparison("ANN", func() (time.Duration, time.Duration, float64, float64) {
+			return testANN(trainData, testData)
+		})
+
+		fmt.Println("\n--- Testing Collaborative Filtering ---")
+		testCollaborativeFiltering("datasets/Reviews.csv")
+
+		fmt.Printf("\nTotal execution time: %v\n", time.Since(startTime))
+	*/
+}
+
+func testRandomForestParallel(
+	rf *randomforest.ParallelRandomForest,
+	trainData, testData [][]float64,
+) (time.Duration, time.Duration, float64) {
+	concTimeStart := time.Now()
+	rf.Train(trainData)
+	trainTime := time.Since(concTimeStart)
+
+	evalTimeStart := time.Now()
+	concAccuracy := evaluateModel(rf, testData, false)
+	evalTime := time.Since(evalTimeStart)
+
+	return trainTime, evalTime, concAccuracy
+}
+
+func evaluateModel(rf interface{}, testData [][]float64, showEx bool) float64 {
+	correct := 0
+	for i, sample := range testData {
+		features := sample[:len(sample)-1]
+		label := sample[len(sample)-1]
+		var prediction float64
+		switch r := rf.(type) {
+		case *randomforest.ParallelRandomForest:
+			// fmt.Println("Evaluating Parallel")
+			prediction = r.Predict(features)
+		default:
+			panic("Unknown Random Forest type")
+		}
+		if (prediction >= 0.5 && label == 1) || (prediction < 0.5 && label == 0) {
+			correct++
+			if correct == 1 && showEx {
+				fmt.Printf("Correct Prediction Example:\n")
+				fmt.Printf("Sample Index: %d\n", i)
+				fmt.Printf("Features: %v\n", features)
+				fmt.Printf("Actual Label: %.2f, Predicted Label: %.2f\n\n", label, prediction)
+			}
+		}
+	}
+	return float64(correct) / float64(len(testData))
 }
 
 func runAlgorithmComparison(
@@ -66,7 +134,7 @@ func runAlgorithmComparison(
 
 func readAndPrepareData() [][]float64 {
 	startTime := time.Now()
-	allData, err := readCSV("datasets/adult.csv", 100000) // Read all data
+	allData, err := readCSV("datasets/adult.csv", 10000) // Read all data
 	if err != nil {
 		fmt.Println("Error reading CSV:", err)
 		os.Exit(1)
