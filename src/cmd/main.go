@@ -1,325 +1,242 @@
 package main
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
-	"concurrente/internal/ann"
-	"concurrente/internal/collaborativefiltering"
-	"concurrente/internal/decisiontree"
 	"concurrente/internal/randomforest"
-	"concurrente/internal/svm"
+)
+
+const (
+	labelIndex = 14 // columna exporta
+)
+
+var (
+	numTrees    int     = 10
+	subsetRatio float64 = 0.8
+	trainRatio  float64 = 0.8
+	datasetSize int     = 100000
 )
 
 func main() {
-	fmt.Println("Starting Parallel Random Forest Algorithm")
-	startTime := time.Now()
+	for {
+		printMenu()
+		choice := getUserChoice()
 
-	allData := readAndPrepareData()
-	trainData, testData := splitData(allData, 0.8)
+		switch choice {
+		case 1:
+			setAlgorithmParameters()
+		case 2:
+			setSimulationParameters()
+		case 3:
+			runSimulation()
+		case 4:
+			compareRuntimes()
+		case 5:
+			predictExporta()
+		case 6:
+			fmt.Println("Saliendo del programa. ¡Hasta luego!")
+			return
+		default:
+			fmt.Println("Opción no válida. Por favor, intente de nuevo.")
+		}
+	}
+}
 
-	fmt.Println("\n--- Testing Parallel Random Forest ---")
-	rf := randomforest.NewParallelRandomForest(10, 0.8)
-	parallelTrainTime, parallelEvalTime, concAccuracy := testRandomForestParallel(
-		rf,
-		trainData,
-		testData,
+func printMenu() {
+	fmt.Println("\n--- Menú de Random Forest Paralelo ---")
+	fmt.Println("1. Establecer Parámetros del Algoritmo")
+	fmt.Println("2. Establecer Parámetros de Simulación")
+	fmt.Println("3. Ejecutar Simulación")
+	fmt.Println("4. Comparar Tiempos de Ejecución para Diferentes Tamaños de Datos")
+	fmt.Println("5. Predecir 'exporta' para un Registro Individual")
+	fmt.Println("6. Salir")
+	fmt.Print("Ingrese su elección: ")
+}
+
+func getUserChoice() int {
+	var choice int
+	_, err := fmt.Scan(&choice)
+	if err != nil {
+		fmt.Println("Error al leer la entrada:", err)
+		return 0
+	}
+	return choice
+}
+
+func setAlgorithmParameters() {
+	fmt.Printf("\nNúmero actual de árboles: %d\n", numTrees)
+	fmt.Print("Ingrese nuevo número de árboles (o presione Enter para mantener el actual): ")
+	input := readLine()
+	if input != "" {
+		if val, err := strconv.Atoi(input); err == nil {
+			numTrees = val
+		}
+	}
+
+	fmt.Printf("\nRatio de subconjunto actual: %.2f\n", subsetRatio)
+	fmt.Print(
+		"Ingrese nuevo ratio de subconjunto (0-1) (o presione Enter para mantener el actual): ",
 	)
-	fmt.Printf("Parallel Training Time: %v\n", parallelTrainTime)
-	fmt.Printf("Parallel Evaluation Time: %v\n", parallelEvalTime)
-	fmt.Printf("Parallel Accuracy: %.2f%%\n", concAccuracy*100)
-	fmt.Printf("Total Parallel Time (No data reading): %v\n", parallelTrainTime+parallelEvalTime)
+	input = readLine()
+	if input != "" {
+		if val, err := strconv.ParseFloat(input, 64); err == nil && val > 0 && val <= 1 {
+			subsetRatio = val
+		}
+	}
 
-	fmt.Printf("\nTotal execution time: %v\n", time.Since(startTime))
-	runAlgorithmComparison(
-		"Random Forest",
-		func() (time.Duration, time.Duration, float64, float64) {
-			return testRandomForest(trainData, testData)
-		},
+	fmt.Printf(
+		"\nParámetros del algoritmo actualizados: Árboles = %d, Ratio de Subconjunto = %.2f\n",
+		numTrees,
+		subsetRatio,
 	)
-	/*
-		fmt.Println("Starting Machine Learning Algorithms Comparison")
-		startTime := time.Now()
+}
 
-		allData := readAndPrepareData()
-		trainData, testData := splitData(allData, 0.8)
+func setSimulationParameters() {
+	fmt.Printf("\nRatio actual de división entrenamiento/prueba: %.2f\n", trainRatio)
+	fmt.Print(
+		"Ingrese nuevo ratio de división entrenamiento/prueba (0-1) (o presione Enter para mantener el actual): ",
+	)
+	input := readLine()
+	if input != "" {
+		if val, err := strconv.ParseFloat(input, 64); err == nil && val > 0 && val < 1 {
+			trainRatio = val
+		}
+	}
 
-		runAlgorithmComparison(
-			"Decision Tree",
-			func() (time.Duration, time.Duration, float64, float64) {
-				return testDecisionTree(trainData, testData)
-			},
-		)
+	fmt.Printf("\nTamaño actual del conjunto de datos: %d\n", datasetSize)
+	fmt.Print(
+		"Ingrese nuevo tamaño del conjunto de datos (o presione Enter para mantener el actual): ",
+	)
+	input = readLine()
+	if input != "" {
+		if val, err := strconv.Atoi(input); err == nil && val > 0 {
+			datasetSize = val
+		}
+	}
 
-		runAlgorithmComparison(
-			"Random Forest",
-			func() (time.Duration, time.Duration, float64, float64) {
-				return testRandomForest(trainData, testData)
-			},
-		)
+	fmt.Printf(
+		"\nParámetros de simulación actualizados: Ratio de Entrenamiento = %.2f, Tamaño del Conjunto de Datos = %d\n",
+		trainRatio,
+		datasetSize,
+	)
+}
 
-		runAlgorithmComparison("SVM", func() (time.Duration, time.Duration, float64, float64) {
-			return testSVM(trainData, testData)
-		})
+func runSimulation() {
+	fmt.Printf("\n--- Ejecutando Simulación ---\n")
+	fmt.Printf(
+		"Parámetros del Algoritmo: Árboles = %d, Ratio de Subconjunto = %.2f\n",
+		numTrees,
+		subsetRatio,
+	)
+	fmt.Printf(
+		"Parámetros de Simulación: Ratio de Entrenamiento = %.2f, Tamaño del Conjunto de Datos = %d\n",
+		trainRatio,
+		datasetSize,
+	)
 
-		runAlgorithmComparison("ANN", func() (time.Duration, time.Duration, float64, float64) {
-			return testANN(trainData, testData)
-		})
+	allData := readAndPrepareData(datasetSize)
+	trainData, testData := splitData(allData, trainRatio)
 
-		fmt.Println("\n--- Testing Collaborative Filtering ---")
-		testCollaborativeFiltering("datasets/Reviews.csv")
+	rf := randomforest.NewParallelRandomForest(numTrees, subsetRatio)
+	trainTime, evalTime, accuracy := testRandomForestParallel(rf, trainData, testData)
 
-		fmt.Printf("\nTotal execution time: %v\n", time.Since(startTime))
-	*/
+	fmt.Printf("\nResultados:\n")
+	fmt.Printf("Tiempo de Entrenamiento: %v\n", trainTime)
+	fmt.Printf("Tiempo de Evaluación: %v\n", evalTime)
+	fmt.Printf("Tiempo Total: %v\n", trainTime+evalTime)
+	fmt.Printf("Precisión: %.2f%%\n", accuracy*100)
+}
+
+func compareRuntimes() {
+	rowSizes := []int{1000, 10000, 100000, 1000000}
+
+	for _, size := range rowSizes {
+		fmt.Printf("\n--- Probando con %d filas ---\n", size)
+		allData := readAndPrepareData(size)
+		trainData, testData := splitData(allData, trainRatio)
+
+		rf := randomforest.NewParallelRandomForest(numTrees, subsetRatio)
+		trainTime, evalTime, accuracy := testRandomForestParallel(rf, trainData, testData)
+
+		fmt.Printf("Tiempo de Entrenamiento: %v\n", trainTime)
+		fmt.Printf("Tiempo de Evaluación: %v\n", evalTime)
+		fmt.Printf("Tiempo Total: %v\n", trainTime+evalTime)
+		fmt.Printf("Precisión: %.2f%%\n", accuracy*100)
+	}
+}
+
+func predictExporta() {
+	fmt.Println("\nIngrese los valores para cada columna (separados por '|'):")
+	input := readLine()
+
+	record := strings.Split(input, "|")
+	if len(record) != 18 {
+		fmt.Println("Error: Número inválido de columnas. Se esperaban 18 columnas.")
+		return
+	}
+
+	allData := readAndPrepareData(datasetSize)
+	trainData, _ := splitData(allData, 1.0) // Usar todos los datos para entrenamiento
+
+	rf := randomforest.NewParallelRandomForest(numTrees, subsetRatio)
+	rf.Train(trainData)
+
+	prediction := rf.Predict(record[:len(record)-1]) // Excluir la última columna (fec_creacion)
+
+	fmt.Printf("Predicción para 'exporta': ")
+	if prediction >= 0.5 {
+		fmt.Println("SI")
+	} else {
+		fmt.Println("NO")
+	}
 }
 
 func testRandomForestParallel(
 	rf *randomforest.ParallelRandomForest,
-	trainData, testData [][]float64,
+	trainData, testData [][]string,
 ) (time.Duration, time.Duration, float64) {
-	concTimeStart := time.Now()
+	trainTimeStart := time.Now()
 	rf.Train(trainData)
-	trainTime := time.Since(concTimeStart)
+	trainTime := time.Since(trainTimeStart)
 
 	evalTimeStart := time.Now()
-	concAccuracy := evaluateModel(rf, testData, false)
+	accuracy := evaluateModel(rf, testData)
 	evalTime := time.Since(evalTimeStart)
 
-	return trainTime, evalTime, concAccuracy
+	return trainTime, evalTime, accuracy
 }
 
-func evaluateModel(rf interface{}, testData [][]float64, showEx bool) float64 {
-	correct := 0
-	for i, sample := range testData {
-		features := sample[:len(sample)-1]
-		label := sample[len(sample)-1]
-		var prediction float64
-		switch r := rf.(type) {
-		case *randomforest.ParallelRandomForest:
-			// fmt.Println("Evaluating Parallel")
-			prediction = r.Predict(features)
-		default:
-			panic("Unknown Random Forest type")
-		}
-		if (prediction >= 0.5 && label == 1) || (prediction < 0.5 && label == 0) {
-			correct++
-			if correct == 1 && showEx {
-				fmt.Printf("Correct Prediction Example:\n")
-				fmt.Printf("Sample Index: %d\n", i)
-				fmt.Printf("Features: %v\n", features)
-				fmt.Printf("Actual Label: %.2f, Predicted Label: %.2f\n\n", label, prediction)
-			}
-		}
-	}
-	return float64(correct) / float64(len(testData))
-}
-
-func runAlgorithmComparison(
-	name string,
-	testFunc func() (time.Duration, time.Duration, float64, float64),
-) {
-	fmt.Printf("\n--- Testing %s ---\n", name)
-	seqTime, concTime, seqAccuracy, concAccuracy := testFunc()
-	speedup := float64(seqTime) / float64(concTime)
-	fmt.Printf("Sequential Time: %v\n", seqTime)
-	fmt.Printf("Concurrent Time: %v\n", concTime)
-	fmt.Printf("Speedup: %.2fx\n", speedup)
-	fmt.Printf("Sequential Accuracy: %.2f%%\n", seqAccuracy*100)
-	fmt.Printf("Concurrent Accuracy: %.2f%%\n", concAccuracy*100)
-}
-
-func readAndPrepareData() [][]float64 {
-	startTime := time.Now()
-	allData, err := readCSV("datasets/adult.csv", 10000) // Read all data
-	if err != nil {
-		fmt.Println("Error reading CSV:", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Read %d records from the dataset\n", len(allData))
-	fmt.Printf("Time taken to read data: %v\n", time.Since(startTime))
-	return allData
-}
-
-func testDecisionTree(
-	trainData, testData [][]float64,
-) (time.Duration, time.Duration, float64, float64) {
-	seqTree := decisiontree.NewSequentialDecisionTree()
-	concTree := decisiontree.NewConcurrentDecisionTree()
-
-	seqTime, seqAccuracy := trainAndTestAlgorithm(seqTree, trainData, testData)
-	concTime, concAccuracy := trainAndTestAlgorithm(concTree, trainData, testData)
-
-	return seqTime, concTime, seqAccuracy, concAccuracy
-}
-
-func testRandomForest(
-	trainData, testData [][]float64,
-) (time.Duration, time.Duration, float64, float64) {
-	seqRF := randomforest.NewSequentialRandomForest(10, 0.8)
-	concRF := randomforest.NewConcurrentRandomForest(10, 0.8)
-
-	seqTime, seqAccuracy := trainAndTestAlgorithm(seqRF, trainData, testData)
-	concTime, concAccuracy := trainAndTestAlgorithm(concRF, trainData, testData)
-
-	return seqTime, concTime, seqAccuracy, concAccuracy
-}
-
-func testSVM(trainData, testData [][]float64) (time.Duration, time.Duration, float64, float64) {
-	seqSVM := svm.NewSequentialSVM(len(trainData[0])-1, 0.01, 0.001, 10)
-	concSVM := svm.NewConcurrentSVM(len(trainData[0])-1, 0.01, 0.001, 10)
-
-	seqTime, seqAccuracy := trainAndTestAlgorithm(seqSVM, trainData, testData)
-	concTime, concAccuracy := trainAndTestAlgorithm(concSVM, trainData, testData)
-
-	return seqTime, concTime, seqAccuracy, concAccuracy
-}
-
-func testANN(trainData, testData [][]float64) (time.Duration, time.Duration, float64, float64) {
-	inputSize := len(trainData[0]) - 1
-	hiddenSize := 10
-	learningRate := 0.01
-	epochs := 10
-
-	seqANN := ann.NewSequentialANN(inputSize, hiddenSize, learningRate, epochs)
-	concANN := ann.NewConcurrentANN(inputSize, hiddenSize, learningRate, epochs)
-
-	seqTime, seqAccuracy := trainAndTestAlgorithm(seqANN, trainData, testData)
-	concTime, concAccuracy := trainAndTestAlgorithm(concANN, trainData, testData)
-
-	return seqTime, concTime, seqAccuracy, concAccuracy
-}
-
-func trainAndTestAlgorithm(
-	algorithm interface{},
-	trainData, testData [][]float64,
-) (time.Duration, float64) {
-	trainingStart := time.Now()
-	switch a := algorithm.(type) {
-	case *decisiontree.SequentialDecisionTree:
-		a.Train(trainData)
-	case *decisiontree.ConcurrentDecisionTree:
-		a.Train(trainData)
-	case *randomforest.SequentialRandomForest:
-		a.Train(trainData)
-	case *randomforest.ConcurrentRandomForest:
-		a.Train(trainData)
-	case *svm.SequentialSVM:
-		a.Train(trainData)
-	case *svm.ConcurrentSVM:
-		a.Train(trainData)
-	case *ann.SequentialANN:
-		a.Train(trainData)
-	case *ann.ConcurrentANN:
-		a.Train(trainData)
-	default:
-		panic("Unknown algorithm type")
-	}
-	trainingDuration := time.Since(trainingStart)
-
-	accuracy := testAlgorithm(algorithm, testData)
-
-	return trainingDuration, accuracy
-}
-
-func testAlgorithm(algorithm interface{}, testData [][]float64) float64 {
+func evaluateModel(rf *randomforest.ParallelRandomForest, testData [][]string) float64 {
 	correct := 0
 	for _, sample := range testData {
 		features := sample[:len(sample)-1]
-		actualLabel := sample[len(sample)-1]
-		var predictedLabel float64
-
-		switch a := algorithm.(type) {
-		case *decisiontree.SequentialDecisionTree:
-			predictedLabel = a.Predict(features)
-		case *decisiontree.ConcurrentDecisionTree:
-			predictedLabel = a.Predict(features)
-		case *randomforest.SequentialRandomForest:
-			predictedLabel = a.Predict(features)
-		case *randomforest.ConcurrentRandomForest:
-			predictedLabel = a.Predict(features)
-		case *svm.SequentialSVM:
-			predictedLabel = a.Predict(features)
-		case *svm.ConcurrentSVM:
-			predictedLabel = a.Predict(features)
-		case *ann.SequentialANN:
-			predictedLabel = a.Predict(features)
-		case *ann.ConcurrentANN:
-			predictedLabel = a.Predict(features)
-		default:
-			panic("Unknown algorithm type")
-		}
-
-		if (predictedLabel > 0.5 && actualLabel == 1) ||
-			(predictedLabel <= 0.5 && actualLabel == 0) {
+		label := sample[labelIndex]
+		prediction := rf.Predict(features)
+		if (prediction >= 0.5 && label == "SI") || (prediction < 0.5 && label == "NO") {
 			correct++
 		}
 	}
-
 	return float64(correct) / float64(len(testData))
 }
 
-func testCollaborativeFiltering(filename string) {
-	reviews, err := collaborativefiltering.ReadAmazonReviews(filename, 100000)
+func readAndPrepareData(limit int) [][]string {
+	allData, err := readCSV("datasets/bd_mujeres_2023.csv", '|', limit)
 	if err != nil {
-		fmt.Println("Error reading data:", err)
-		return
+		fmt.Println("Error al leer el CSV:", err)
+		os.Exit(1)
 	}
-
-	ratingMatrix, userMap, productMap := collaborativefiltering.ConvertToMatrix(reviews)
-	numUsers := len(userMap)
-	numItems := len(productMap)
-
-	fmt.Printf("Loaded %d users and %d items\n", numUsers, numItems)
-
-	numFactors := 10
-	learningRate := 0.005
-	regularization := 0.02
-	epochs := 20
-
-	// Sequential version
-	seqMF := collaborativefiltering.NewSequentialMatrixFactorization(
-		numUsers,
-		numItems,
-		numFactors,
-		learningRate,
-		regularization,
-		epochs,
-	)
-	seqStart := time.Now()
-	seqMF.Train(ratingMatrix)
-	seqDuration := time.Since(seqStart)
-	seqRMSE := seqMF.CalculateRMSE(ratingMatrix)
-
-	// Concurrent version
-	concMF := collaborativefiltering.NewConcurrentMatrixFactorization(
-		numUsers,
-		numItems,
-		numFactors,
-		learningRate,
-		regularization,
-		epochs,
-	)
-	concStart := time.Now()
-	concMF.Train(ratingMatrix)
-	concDuration := time.Since(concStart)
-	concRMSE := concMF.CalculateRMSE(ratingMatrix)
-
-	// Compare performance
-	speedup := float64(seqDuration) / float64(concDuration)
-	fmt.Printf("Sequential Time: %v\n", seqDuration)
-	fmt.Printf("Concurrent Time: %v\n", concDuration)
-	fmt.Printf("Speedup: %.2fx\n", speedup)
-	fmt.Printf("Sequential RMSE: %.4f\n", seqRMSE)
-	fmt.Printf("Concurrent RMSE: %.4f\n", concRMSE)
+	fmt.Printf("Se leyeron %d registros del conjunto de datos\n", len(allData))
+	return allData
 }
 
-// readCSV and splitData functions remain unchanged
-
-func readCSV(filename string, limit int) ([][]float64, error) {
+func readCSV(filename string, separator rune, limit int) ([][]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -327,46 +244,35 @@ func readCSV(filename string, limit int) ([][]float64, error) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, err
-	}
+	reader.Comma = separator
 
-	var data [][]float64
-	for i, record := range records {
-		if i == 0 { // Skip header
-			continue
-		}
-		if limit > 0 && i > limit { // Limit the number of rows if specified
+	var data [][]string
+	for i := 0; ; i++ {
+		record, err := reader.Read()
+		if err != nil {
 			break
 		}
-		row := make([]float64, len(record))
-		for j, value := range record {
-			if j == len(record)-1 { // Last column is the target
-				if value == ">50K" {
-					row[j] = 1
-				} else {
-					row[j] = 0
-				}
-			} else {
-				floatValue, err := strconv.ParseFloat(value, 64)
-				if err != nil {
-					// If parsing fails, assign a default value
-					floatValue = 0
-				}
-				row[j] = floatValue
-			}
+		if i == 0 {
+			continue // saltar encabezado
 		}
-		data = append(data, row)
+		if limit > 0 && i > limit {
+			break
+		}
+		data = append(data, record)
 	}
-
 	return data, nil
 }
 
-func splitData(data [][]float64, trainRatio float64) ([][]float64, [][]float64) {
+func splitData(data [][]string, trainRatio float64) ([][]string, [][]string) {
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(data), func(i, j int) { data[i], data[j] = data[j], data[i] })
-
 	splitIndex := int(float64(len(data)) * trainRatio)
 	return data[:splitIndex], data[splitIndex:]
 }
+
+func readLine() string {
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	return strings.TrimSpace(input)
+}
+

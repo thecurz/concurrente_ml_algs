@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"strconv"
 	"sync"
 )
 
@@ -35,17 +36,15 @@ func NewParallelRandomForest(numTrees int, subsetRatio float64) *ParallelRandomF
 	}
 }
 
-func (rf *ParallelRandomForest) Train(data [][]float64) {
+func (rf *ParallelRandomForest) Train(data [][]string) {
 	var wg sync.WaitGroup
 	treeChan := make(chan int, rf.numTrees)
 
-	// Fill the channel with tree indices
 	for i := 0; i < rf.numTrees; i++ {
 		treeChan <- i
 	}
 	close(treeChan)
 
-	// Create worker pool
 	for i := 0; i < rf.numWorkers; i++ {
 		wg.Add(1)
 		go func() {
@@ -61,7 +60,7 @@ func (rf *ParallelRandomForest) Train(data [][]float64) {
 	wg.Wait()
 }
 
-func (rf *ParallelRandomForest) Predict(sample []float64) float64 {
+func (rf *ParallelRandomForest) Predict(sample []string) float64 {
 	predictions := make([]float64, rf.numTrees)
 	var wg sync.WaitGroup
 	wg.Add(rf.numTrees)
@@ -77,9 +76,9 @@ func (rf *ParallelRandomForest) Predict(sample []float64) float64 {
 	return rf.majorityVote(predictions)
 }
 
-func (rf *ParallelRandomForest) createBootstrapSample(data [][]float64) [][]float64 {
+func (rf *ParallelRandomForest) createBootstrapSample(data [][]string) [][]string {
 	sampleSize := int(float64(len(data)) * rf.subsetRatio)
-	sample := make([][]float64, sampleSize)
+	sample := make([][]string, sampleSize)
 	var wg sync.WaitGroup
 	wg.Add(sampleSize)
 
@@ -87,7 +86,7 @@ func (rf *ParallelRandomForest) createBootstrapSample(data [][]float64) [][]floa
 		go func(index int) {
 			defer wg.Done()
 			randomIndex := rand.Intn(len(data))
-			sample[index] = make([]float64, len(data[randomIndex]))
+			sample[index] = make([]string, len(data[randomIndex]))
 			copy(sample[index], data[randomIndex])
 		}(i)
 	}
@@ -104,11 +103,11 @@ func (rf *ParallelRandomForest) majorityVote(predictions []float64) float64 {
 	return sum / float64(len(predictions))
 }
 
-func (tree *ParallelDecisionTree) Train(data [][]float64) {
+func (tree *ParallelDecisionTree) Train(data [][]string) {
 	tree.root = tree.buildTree(data, 0)
 }
 
-func (tree *ParallelDecisionTree) buildTree(data [][]float64, depth int) *Node {
+func (tree *ParallelDecisionTree) buildTree(data [][]string, depth int) *Node {
 	if len(data) == 0 {
 		return &Node{Prediction: 0}
 	}
@@ -129,12 +128,12 @@ func (tree *ParallelDecisionTree) buildTree(data [][]float64, depth int) *Node {
 	}
 }
 
-func (tree *ParallelDecisionTree) findBestSplit(data [][]float64) (int, float64) {
+func (tree *ParallelDecisionTree) findBestSplit(data [][]string) (int, float64) {
 	bestFeature := 0
 	bestThreshold := 0.0
 	bestGini := float64(1)
 
-	for feature := 0; feature < len(data[0])-1; feature++ {
+	for feature := 1; feature < len(data[0])-1; feature++ {
 		threshold := tree.findMedian(data, feature)
 		gini := tree.calculateGiniIndex(data, feature, threshold)
 
@@ -148,16 +147,21 @@ func (tree *ParallelDecisionTree) findBestSplit(data [][]float64) (int, float64)
 	return bestFeature, bestThreshold
 }
 
-func (tree *ParallelDecisionTree) findMedian(data [][]float64, feature int) float64 {
-	values := make([]float64, len(data))
-	for i, row := range data {
-		values[i] = row[feature]
+func (tree *ParallelDecisionTree) findMedian(data [][]string, feature int) float64 {
+	values := make([]float64, 0, len(data))
+	for _, row := range data {
+		if val, err := strconv.ParseFloat(row[feature], 64); err == nil {
+			values = append(values, val)
+		}
+	}
+	if len(values) == 0 {
+		return 0
 	}
 	return values[len(values)/2]
 }
 
 func (tree *ParallelDecisionTree) calculateGiniIndex(
-	data [][]float64,
+	data [][]string,
 	feature int,
 	threshold float64,
 ) float64 {
@@ -165,17 +169,26 @@ func (tree *ParallelDecisionTree) calculateGiniIndex(
 	leftPositive, rightPositive := 0, 0
 
 	for _, row := range data {
-		if row[feature] < threshold {
+		val, err := strconv.ParseFloat(row[feature], 64)
+		if err != nil {
+			continue
+		}
+
+		if val < threshold {
 			leftCount++
-			if row[len(row)-1] == 1 {
+			if row[len(row)-1] == "SI" {
 				leftPositive++
 			}
 		} else {
 			rightCount++
-			if row[len(row)-1] == 1 {
+			if row[len(row)-1] == "SI" {
 				rightPositive++
 			}
 		}
+	}
+
+	if leftCount == 0 || rightCount == 0 {
+		return 1.0
 	}
 
 	leftGini := 1.0 - math.Pow(
@@ -198,14 +211,19 @@ func (tree *ParallelDecisionTree) calculateGiniIndex(
 }
 
 func (tree *ParallelDecisionTree) splitData(
-	data [][]float64,
+	data [][]string,
 	feature int,
 	threshold float64,
-) ([][]float64, [][]float64) {
-	var left, right [][]float64
+) ([][]string, [][]string) {
+	var left, right [][]string
 
 	for _, row := range data {
-		if row[feature] < threshold {
+		val, err := strconv.ParseFloat(row[feature], 64)
+		if err != nil {
+			continue
+		}
+
+		if val < threshold {
 			left = append(left, row)
 		} else {
 			right = append(right, row)
@@ -215,18 +233,29 @@ func (tree *ParallelDecisionTree) splitData(
 	return left, right
 }
 
-func (tree *ParallelDecisionTree) calculatePrediction(data [][]float64) float64 {
+func (tree *ParallelDecisionTree) calculatePrediction(data [][]string) float64 {
 	sum := 0.0
+	count := 0
 	for _, row := range data {
-		sum += row[len(row)-1]
+		if row[len(row)-1] == "SI" {
+			sum += 1
+		}
+		count++
 	}
-	return sum / float64(len(data))
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
 }
 
-func (tree *ParallelDecisionTree) Predict(sample []float64) float64 {
+func (tree *ParallelDecisionTree) Predict(sample []string) float64 {
 	node := tree.root
 	for node.Left != nil && node.Right != nil {
-		if sample[node.Feature] < node.Threshold {
+		val, err := strconv.ParseFloat(sample[node.Feature], 64)
+		if err != nil {
+			break
+		}
+		if val < node.Threshold {
 			node = node.Left
 		} else {
 			node = node.Right
@@ -234,3 +263,4 @@ func (tree *ParallelDecisionTree) Predict(sample []float64) float64 {
 	}
 	return node.Prediction
 }
+
